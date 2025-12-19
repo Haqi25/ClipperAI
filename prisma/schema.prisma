@@ -1,0 +1,249 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+// User model - synced with Clerk
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique // Clerk user ID
+  email     String   @unique
+  name      String?
+  imageUrl  String?
+  
+  // Subscription info
+  planType  PlanType @default(FREE)
+  
+  // Usage tracking
+  projectsCount    Int      @default(0)
+  monthlyQuota     Int      @default(3) // Projects per month
+  quotaResetDate   DateTime @default(now())
+  
+  // Relations
+  projects  Project[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([clerkId])
+  @@index([email])
+}
+
+// Project model - main content container
+model Project {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  
+  // Source info
+  sourceType  SourceType    // TEXT, VIDEO, AUDIO, URL
+  sourceUrl   String?       // If from URL
+  
+  // Processing status
+  status      ProcessStatus @default(PENDING)
+  
+  // Relations
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  mediaFile   MediaFile?
+  transcript  Transcript?
+  contents    GeneratedContent[]
+  clips       VideoClip[]
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Media file storage info
+model MediaFile {
+  id          String   @id @default(cuid())
+  
+  // File info
+  fileName    String
+  fileType    String   // video/mp4, audio/mp3, etc.
+  fileSize    Int      // in bytes
+  fileUrl     String   // Storage URL (Supabase/Cloudinary)
+  thumbnailUrl String? // For videos
+  
+  // Media properties
+  duration    Int?     // in seconds (for video/audio)
+  width       Int?     // for video
+  height      Int?     // for video
+  
+  // Relations
+  projectId   String   @unique
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([projectId])
+}
+
+// Transcript from audio/video
+model Transcript {
+  id        String   @id @default(cuid())
+  
+  // Transcript content
+  content   String   @db.Text // Full transcript
+  language  String   @default("en")
+  
+  // Timestamps for each segment (JSON)
+  segments  Json?    // Array of {text, start, end}
+  
+  // Processing info
+  provider  String?  // whisper, assemblyai, etc.
+  confidence Float?  // 0-1 accuracy score
+  
+  // Relations
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([projectId])
+}
+
+// Generated content for different platforms
+model GeneratedContent {
+  id          String      @id @default(cuid())
+  
+  // Platform info
+  platform    Platform    // TWITTER, LINKEDIN, INSTAGRAM, etc.
+  contentType ContentType // THREAD, POST, CAPTION, SCRIPT, etc.
+  
+  // Content
+  content     String      @db.Text
+  metadata    Json?       // Additional data (hashtags, mentions, etc.)
+  
+  // Stats
+  characterCount Int?
+  wordCount      Int?
+  
+  // Status
+  status      ContentStatus @default(DRAFT)
+  publishedAt DateTime?
+  
+  // Relations
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  @@index([projectId])
+  @@index([platform])
+  @@index([status])
+}
+
+// Video clips extracted from main video
+model VideoClip {
+  id          String   @id @default(cuid())
+  
+  // Clip info
+  title       String
+  description String?
+  
+  // Timing
+  startTime   Float    // in seconds
+  endTime     Float    // in seconds
+  duration    Float    // in seconds
+  
+  // File info
+  clipUrl     String?  // URL after processing
+  thumbnailUrl String?
+  
+  // Target platform
+  platform    Platform // YOUTUBE_SHORTS, TIKTOK, INSTAGRAM_REELS
+  format      String?  // 9:16, 16:9, 1:1
+  
+  // Processing
+  status      ClipStatus @default(PENDING)
+  
+  // AI suggestions
+  viralScore  Float?   // 0-1 predicted viral potential
+  
+  // Relations
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([projectId])
+  @@index([platform])
+}
+
+// Enums
+enum PlanType {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum SourceType {
+  TEXT
+  VIDEO
+  AUDIO
+  URL
+}
+
+enum ProcessStatus {
+  PENDING      // Just created
+  UPLOADING    // File uploading
+  TRANSCRIBING // Creating transcript
+  ANALYZING    // AI analyzing content
+  GENERATING   // Generating content
+  COMPLETED    // All done
+  FAILED       // Error occurred
+}
+
+enum Platform {
+  TWITTER
+  LINKEDIN
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE
+  YOUTUBE_SHORTS
+  FACEBOOK
+  THREADS
+}
+
+enum ContentType {
+  THREAD       // Twitter thread
+  POST         // Single post (LinkedIn, FB)
+  CAPTION      // Instagram caption
+  SCRIPT       // Video script
+  DESCRIPTION  // YouTube description
+  SHORT_CLIP   // Short video idea
+}
+
+enum ContentStatus {
+  DRAFT
+  READY
+  PUBLISHED
+  SCHEDULED
+  FAILED
+}
+
+enum ClipStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
